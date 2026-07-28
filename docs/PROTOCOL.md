@@ -189,6 +189,8 @@ This matters because the stop sequences are `["<|end_of_text|>", "<|start_of_rol
 
 **What this implies if you serve the model yourself.** You need an endpoint that accepts raw completions, you must reproduce the role markers exactly, you must not let the server apply its own chat template on top, and you must handle the `<think>` prefix and the `<tool_call>` parsing in your client. The upside of the raw approach is that it is fully explicit and portable across serving stacks — which is exactly why it works against a local `mlx_lm.server` on Apple Silicon, where a vLLM-specific tool-call parser would not be available.
 
+We verified this rather than assuming it. `mlx_lm.server` 0.31.3 routes `/v1/completions` to `handle_text_completions`, reads and validates `frequency_penalty`, passes it into the sampler, and honours a client-supplied `stop` list — so every parameter the Antares runner sends is actually respected. Every result in this repository was produced over that path. There is one thing the raw approach does *not* save you from: mlx-lm still infers a tool-call parser from the chat template and will strip `<tool_call>` markup out of the completion before you see it. That has to be disabled explicitly, and it is the third fix in `docs/TROUBLESHOOTING.md`.
+
 ## 6. The sandbox as a security boundary
 
 Every entry gets its own container, built in `sandbox.py` and destroyed by the CLI after scoring. The image is `ubuntu:24.04` with a handful of search tools installed and a non-root `agent` user created; commands are executed as `-u agent -w /workspace/repo`. The container is created with `--network=none`, `--cpus=2`, and `--memory=4g` by default, sleeps forever, and receives the repository by `docker cp` of the zip followed by an in-container unzip.
@@ -228,7 +230,22 @@ return output[:max_chars] + f"\n\n[TRUNCATED — {len(output)} total chars, show
 
 and each command runs under a ten-second `subprocess.run` timeout, after which the model gets `ERROR: Command timed out after 10s`.
 
-Now the honest part. **The allowlist is not the security boundary; the container is.** The validator checks only the first word of each pipe segment, and several allowed commands can execute other programs — `find` has `-exec`, `awk` has `system()`, `xargs` runs whatever it is given, and `sed -i` writes files. The denied-pattern list also does not include `;`, so `cat a; something-else` passes validation. What actually makes it safe to run a model-authored shell over 500 untrusted third-party repositories is the layered container configuration: no network at all, an unprivileged user, CPU and memory caps that bound a fork bomb or a runaway `find`, a per-command timeout, and a container that is thrown away after the entry and can be rebuilt from the zip at any moment. Nothing the model does can reach the host, the network, or the next entry.
+Now the honest part. **The allowlist is not the security boundary; the container is.** The validator checks only the first word of each pipe segment, and several allowed commands can execute other programs. This is not a theoretical concern; every one of the following returns `(True, 'ok')`:
+
+```python
+from vulnerability_localization_benchmark.sandbox import validate_command
+validate_command('find . -name "*.py" -exec cat {} ;')   # (True, 'ok')
+validate_command("awk 'BEGIN{system(\"id\")}'")           # (True, 'ok')  -> arbitrary execution
+validate_command('sed -i s/a/b/ file.txt')                # (True, 'ok')  -> writes to the repo
+validate_command('ls ; cat /etc/passwd')                  # (True, 'ok')  -> ';' is not denied
+validate_command('find . -exec rm -rf {} +')              # (True, 'ok')
+```
+
+The same first-word check is simultaneously too strict in the other direction, rejecting `rg -n "unsafe|from_raw" src` because it splits on `|` inside quotes; see `docs/RESULTS.md`, where that defect costs the model roughly a quarter of its exploration budget.
+
+Note also that `sed -i` can actually modify the repository, because the harness copies the zip into the container rather than mounting it read-only. Our `minimal_agent.py` mounts read-only instead, which closes that particular gap.
+
+None of this makes the benchmark unsafe to run, because the allowlist was never what was protecting you. What actually makes it safe to run a model-authored shell over 500 untrusted third-party repositories is the layered container configuration: no network at all, an unprivileged user, CPU and memory caps that bound a fork bomb or a runaway `find`, a per-command timeout, and a container that is thrown away after the entry and can be rebuilt from the zip at any moment. Nothing the model does can reach the host, the network, or the next entry.
 
 Seen in that light, the allowlist's real job is *task definition* rather than containment. It forces every model onto the same read-only exploration interface, so that scores are comparable and no model can win by, say, running the project's test suite. That reading is consistent with the harness offering `--permissive`, which sets `sandbox.PERMISSIVE = True` and skips `validate_command` entirely — the README even recommends it, on the grounds that the container is already isolated. Turning it on changes what the task *is*, not just how strictly it is policed.
 
@@ -287,7 +304,7 @@ Aggregation reports `mean_file_f1` and `abstain_rate` for Phase A, and `true_neg
 
 Each of these is verifiable in the harness source and each changes how you should read a result.
 
-**The generic runner loses tool calls on the way back into the conversation.** The agent loop stores `conv.append({"role": "assistant", "content": assistant_msg})`, and for the `vllm` runner `assistant_msg` is `message.get("content", "")` — the `tool_calls` array is dropped. This has two effects. The trace files contain the model's prose but no structured record of which commands it ran, so a chat-runner trace can look nearly empty for a model that puts everything in `tool_calls` and nothing in `content`. And the conversation replayed to `/v1/chat/completions` on the next turn contains a `tool` message with a `tool_call_id` that no preceding assistant message declares — technically malformed under the OpenAI schema, tolerated by lenient servers. The Antares runner is unaffected, because for it the tool call *is* text and survives verbatim.
+**The generic runner loses tool calls on the way back into the conversation.** The agent loop stores `conv.append({"role": "assistant", "content": assistant_msg})`, and for the `vllm` runner `assistant_msg` is `message.get("content", "")` — the `tool_calls` array is dropped. This has two effects. The trace files contain the model's prose but no structured record of which commands it ran, so a chat-runner trace can look nearly empty for a model that puts everything in `tool_calls` and nothing in `content`. And the conversation replayed to `/v1/chat/completions` on the next turn contains a `tool` message with a `tool_call_id` that no preceding assistant message declares, which is malformed under the OpenAI schema. Whether a given server rejects that or quietly accepts it we did not test; `mlx_lm.server` accepted it, since our Granite runs completed normally. The Antares runner is unaffected, because for it the tool call *is* text and survives verbatim.
 
 **Multiple tool calls in one turn collapse into one response.** The loop concatenates all results with `"\n".join(tool_results)` and attaches only `parsed_calls[0].get("id")`. A chat model that emits three tool calls gets one merged reply carrying the first call's id. The Antares runner sidesteps this by construction, since its parser returns at most one call.
 

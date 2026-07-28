@@ -115,6 +115,13 @@ which is the entire task. The effect is that roughly a quarter of every model's 
 exploration budget is destroyed before it can be used, and every published VLoc Bench score
 is depressed by it. Fixing it means parsing with `shlex` before validating.
 
+The same validator is too permissive in the other direction. `awk 'BEGIN{system("id")}'`,
+`find . -exec rm -rf {} +`, `sed -i` and `ls ; cat /etc/passwd` all pass it, because it
+inspects only the first word of each pipe segment and `;` is not in the denied list. That is
+not a reason to distrust the benchmark — the container, not the allowlist, is the security
+boundary, and it is a good one — but it does mean the allowlist costs real measurement
+accuracy while buying little safety. `docs/PROTOCOL.md` has the verification.
+
 The remaining rejections are a model habit rather than a harness defect: Antares opens almost
 every episode with `cd /workspace/repo && ls`, which fails twice — once for `&&`, once for
 `cd` — even though the sandbox already executes with the repository as the working directory.

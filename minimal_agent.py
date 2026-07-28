@@ -35,7 +35,11 @@ trust, so it does what the benchmark does and then some:
   - commands run as a non-root user, under CPU, memory and wall-clock limits;
   - every command is checked against an allowlist of read-only tools, and rejected if it
     contains shell metacharacters that could chain, substitute or redirect.
-Do not add a `--permissive` style escape hatch here. If you want one, use the harness.
+The allowlist is the weakest of those and is not what protects you. It checks only the
+first word of each pipe segment, so `awk 'BEGIN{system("id")}'`, `find -exec`, and `;`
+chaining all pass it (see docs/PROTOCOL.md). The container is the boundary: no network, no
+write access, no privileges, thrown away afterwards. Keep it that way, and do not add a
+`--permissive` style escape hatch here. If you want one, use the harness.
 """
 
 from __future__ import annotations
