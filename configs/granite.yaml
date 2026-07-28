@@ -1,0 +1,41 @@
+# ibm-granite/granite-4.0-1b — the base instruct model Antares was trained from.
+#
+# This is the control arm. It answers "how much of Antares's score is the post-training
+# and how much was already in the base model?"
+#
+# Note the runner differs from Antares's on purpose. Granite ships a chat template with
+# native tool calling, so the fair comparison gives it the generic `vllm` runner and the
+# /v1/chat/completions path it was built for, rather than forcing it through Antares's
+# hand-built prompt format. Handicapping the control would make the headline number
+# meaningless. docs/METHODOLOGY.md records the same-protocol arm separately.
+#
+# Serve this checkpoint WITHOUT the shim: we want mlx-lm's tool parser active here, so
+# that Granite's tool calls arrive as structured OpenAI tool_calls.
+
+model:
+  api_base: "http://127.0.0.1:8081/v1"
+  name: ""            # set by run_eval.py
+  runner: "vllm"      # /v1/chat/completions with tools + tool_choice=auto
+
+agent:
+  max_turns: 20
+  max_terminal_calls: 15
+  temperature: 0.3
+  max_tokens: 16384
+  frequency_penalty: 0.3
+
+sandbox:
+  image: "vulnerability-localization-benchmark-sandbox"
+  cpus: 2
+  memory: "4g"
+  network: "none"
+  command_timeout: 10
+
+eval:
+  phases: "ab"
+  workers: 1
+  resume: true
+
+data:
+  manifest: "vendor/vloc-bench/data/manifest.csv"
+  zips_dir: "data/ghsa-vulns"

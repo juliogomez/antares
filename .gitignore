@@ -1,0 +1,46 @@
+# Python environment (project-local; never global)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Spike scratch from the de-risking phase; not part of the deliverable
+.spike/
+
+# Model weights and the generated MLX shim. Rebuilt by scripts/build_mlx_shim.py
+# from the Hugging Face cache; never committed (multi-GB, and antares-1b is gated).
+models/
+*.safetensors
+*.gguf
+
+# The benchmark is fetched at a pinned ref by scripts/fetch_benchmark.sh, not vendored.
+vendor/
+third_party/
+
+# Benchmark dataset: 1000 repo zips, ~14 GB. Manifests are derived from the upstream
+# checkout by scripts/make_subset.py; the subset definitions live in configs/*_ids.txt,
+# which is the part worth reviewing.
+data/
+*.zip
+
+# Run outputs. Curated results are copied into results/ deliberately;
+# everything else here is scratch.
+runs/
+out/
+*.log
+!docs/**/*.log
+
+# Environment-specific and secret-adjacent. The corporate CA bundle lives in
+# ~/.config/corp-ca/ and must never be committed; HF/Cursor tokens live in the
+# environment or ~/.cache/huggingface/token, never in this repo.
+.env
+.envrc
+*.pem
+*.crt
+*.key
+secrets/
+
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/

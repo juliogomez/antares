@@ -1,0 +1,39 @@
+# Antares-1B served by mlx_lm.server on Apple Silicon.
+#
+# Every agent/sandbox value below is copied unchanged from the harness's
+# configs/default.yaml. We do not tune the agent for our model: the point of the
+# exercise is to reproduce Cisco's protocol, not to find a favourable one.
+#
+# model.name and model.api_base are injected by scripts/run_eval.py, because
+# mlx_lm.server routes on the local shim path and that path is machine-specific.
+
+model:
+  api_base: "http://127.0.0.1:8080/v1"
+  name: ""            # set by run_eval.py to the absolute shim path
+  runner: "vllm_antares"   # raw /v1/completions + hand-built Antares template
+
+agent:
+  max_turns: 20
+  max_terminal_calls: 15
+  temperature: 0.3
+  max_tokens: 16384
+  frequency_penalty: 0.3
+
+sandbox:
+  image: "vulnerability-localization-benchmark-sandbox"
+  cpus: 2
+  memory: "4g"
+  network: "none"
+  command_timeout: 10
+
+eval:
+  phases: "ab"
+  # One worker. mlx_lm.server generates serially, so extra workers would queue on
+  # the same GPU while thrashing its prompt cache, and would make per-turn latency
+  # measurements meaningless.
+  workers: 1
+  resume: true
+
+data:
+  manifest: "vendor/vloc-bench/data/manifest.csv"
+  zips_dir: "data/ghsa-vulns"

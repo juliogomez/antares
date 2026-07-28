@@ -1,0 +1,13 @@
+# Smoke set: 5 pairs (10 agent runs per model, phases A and B).
+#
+# Purpose is plumbing validation, not measurement. These IDs were chosen as the
+# smallest repository in each of five ecosystems so a full smoke pass finishes in
+# minutes. They are NOT a representative sample and no headline number should ever
+# be quoted from them — see docs/METHODOLOGY.md.
+#
+# alpha_id   ecosystem  repo                                    CWE(s)
+CfCCjjIt   # npm        DrPaulBrewer/cumulative-distribution-…  CWE-20, CWE-835
+JqAIZxnS   # pip        mpdavis/python-jose                     CWE-409
+F8fQddbi   # maven      apache/sling-org-apache-sling-i18n      CWE-269
+p85ZaMXO   # go         yi-ge/unzip                             CWE-22
+Kv0mIk0C   # rust       tokio-rs/slab                           CWE-119
