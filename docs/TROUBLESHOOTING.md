@@ -153,9 +153,11 @@ python -m mlx_lm server --model models/antares-1b-shim --port 8080 \
 With `workers: 1` only one conversation is ever live, so two cached sequences is plenty.
 `scripts/serve.sh` applies these flags.
 
-**Detection.** `scripts/analyze.py` reports the zero-tool-call rate. If it is not close to
-what you saw in the smoke set, distrust the run before you distrust the model. We deleted
-all 74 poisoned results and re-ran rather than trying to filter them.
+**Detection.** Run `scripts/run_health.py <run_dir>` before you look at any score. It
+classifies every zero-tool-call result by how long it took — under a second means a refused
+connection, within 5% of the timeout means a hung server, and neither is something
+generation can do — and exits non-zero if a run contains any. `scripts/arms.sh` gates every
+arm on it. We deleted all 74 poisoned results and re-ran rather than trying to filter them.
 
 ### Background jobs die when the terminal goes away
 
@@ -168,6 +170,40 @@ python scripts/daemon.py --name sweep-antares -- python scripts/run_eval.py --mo
 python scripts/daemon.py --status sweep-antares
 python scripts/daemon.py --stop   sweep-antares
 ```
+
+### Stopping a sweep leaves an orphan that fabricates results
+
+The sequel to the two failures above, and the worst of the three, because the first two
+needed a memory-starved machine and this one only needs you to stop a job.
+
+`scripts/daemon.py --stop` originally signalled the pid it had recorded. That pid is the
+`run_eval.py` wrapper, which spawns the benchmark CLI as a **child**. Killing the wrapper
+therefore orphaned the CLI, which was reparented to init and kept running — invisible to
+`--status`, which reported the job as stopped.
+
+Ours survived for nearly five hours. We had stopped it, deleted its partial results, and
+relaunched a clean sweep. Meanwhile the orphan outlived the model server it depended on, so
+every request failed instantly with connection refused, and the agent loop dutifully
+recorded each failure as a completed run: **960 results in four minutes, every one a Phase B
+true negative.** It also wrote nine results into the new sweep's directory in the four
+seconds around the relaunch, which is how a supposedly clean run ended up 5 pairs poisoned.
+
+**Fix.** `stop()` now signals the whole process group. `start()` already puts each job in its
+own session via `os.setsid()`, so the job is its own group leader and `os.killpg` reaches its
+children; the function then verifies with `ps -g` and escalates to `SIGKILL` for stragglers
+rather than assuming the signal worked.
+
+**If you suspect it happened to you:**
+
+```bash
+# orphans have PPID 1 and are not visible to --status
+ps -eo pid,ppid,etime,command | rg "vulnerability_localization_benchmark.cli"
+python scripts/run_health.py runs/<run-dir>    # find what they wrote
+```
+
+The lesson generalises past this repository: when a harness records a failed API call as a
+completed episode, process hygiene stops being an operational detail and becomes a
+correctness requirement.
 
 ### `aggregate.json` disagrees with the number of result files
 

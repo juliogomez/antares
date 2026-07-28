@@ -1,0 +1,299 @@
+From e00ec11bb380dff05c5af4fc41c5a5ea45809c07 Mon Sep 17 00:00:00 2001
+From: Julio Gomez <juliogomezsanchez@gmail.com>
+Date: Tue, 28 Jul 2026 23:58:49 +0200
+Subject: [PATCH] Make sandbox pipeline splitting quote-aware
+
+validate_command splits the command on every '|' to check that each pipeline
+stage is an allowed program. The split does not account for quoting, so a pipe
+inside a quoted argument is read as a pipeline separator. A regex alternation
+like
+
+    rg -n "unsafe|from_raw"
+
+is therefore parsed as two stages, the second being the command `from_raw"`,
+and the command is rejected with `command not allowed: from_raw"`.
+
+Commands are executed with `bash -c`, which does not treat a quoted pipe as a
+pipe, so the validator's parse disagrees with the shell that runs the command.
+Regex alternation is common in the searches an agent wants to run, so these
+rejections consume the terminal-call budget without returning any information.
+
+Split only on pipes that bash would treat as pipes, tracking single quotes,
+double quotes and backslash escapes inside double quotes. If the command ends
+inside an unterminated quote its quoting cannot be trusted, so fall back to
+splitting on every pipe as before; that keeps the change from ever accepting a
+command the previous logic refused.
+
+The allowlist, the denied patterns and the requirement that every real
+pipeline stage be an allowed program are unchanged. DENIED_PATTERNS is
+deliberately left alone, so a quoted '||' is still refused as before.
+
+Tests cover the newly accepted commands, the cases that must still be
+rejected, the unterminated-quote fallback, and the invariant that the new
+check accepts a superset of what the old one accepted. Written with unittest
+so the suite needs no new dependency:
+
+    python -m unittest discover -s tests
+---
+ .../sandbox.py                                |  52 ++++-
+ tests/test_validate_command.py                | 178 ++++++++++++++++++
+ 2 files changed, 229 insertions(+), 1 deletion(-)
+ create mode 100644 tests/test_validate_command.py
+
+diff --git a/src/vulnerability_localization_benchmark/sandbox.py b/src/vulnerability_localization_benchmark/sandbox.py
+index 99ea7e8..122d5ab 100644
+--- a/src/vulnerability_localization_benchmark/sandbox.py
++++ b/src/vulnerability_localization_benchmark/sandbox.py
+@@ -30,6 +30,51 @@ _container_registry = {}
+ PERMISSIVE = False
+ 
+ 
++def _split_pipeline(cmd: str) -> tuple[list[str], bool]:
++    """Split on pipe characters that bash would treat as pipes.
++
++    A plain cmd.split('|') also splits inside quoted arguments, so a regex alternation
++    such as `rg -n "unsafe|from_raw"` is read as a two-stage pipeline whose second stage
++    is the command `from_raw"`. Commands are executed with `bash -c`, which does not
++    treat a quoted pipe as a pipe, so splitting on it disagrees with the shell that
++    actually runs the command.
++
++    If the command ends inside an unterminated quote its quoting cannot be trusted, so the
++    caller falls back to the previous behaviour of splitting on every pipe. That keeps this
++    change from ever accepting something the naive split refused.
++
++    Returns the segments and whether the command ended inside an unterminated quote.
++    """
++    segments: list[str] = []
++    current: list[str] = []
++    quote: str | None = None
++    i = 0
++    while i < len(cmd):
++        ch = cmd[i]
++        if quote is None:
++            if ch in ("'", '"'):
++                quote = ch
++                current.append(ch)
++            elif ch == '|':
++                segments.append(''.join(current))
++                current = []
++            else:
++                current.append(ch)
++        elif ch == '\\' and quote == '"' and i + 1 < len(cmd):
++            # Inside double quotes bash honours a backslash escape, so \" stays quoted.
++            current.append(ch)
++            i += 1
++            current.append(cmd[i])
++        elif ch == quote:
++            quote = None
++            current.append(ch)
++        else:
++            current.append(ch)
++        i += 1
++    segments.append(''.join(current))
++    return segments, quote is not None
++
++
+ def validate_command(cmd: str) -> tuple[bool, str]:
+     cmd_stripped = cmd.strip()
+     if not cmd_stripped:
+@@ -39,7 +84,12 @@ def validate_command(cmd: str) -> tuple[bool, str]:
+         if re.search(pattern, cmd_stripped):
+             return False, f"denied pattern: {pattern}"
+ 
+-    segments = [s.strip() for s in cmd_stripped.split('|')]
++    raw_segments, unterminated = _split_pipeline(cmd_stripped)
++    if unterminated:
++        # Quoting we cannot parse: split on every pipe, exactly as before.
++        raw_segments = cmd_stripped.split('|')
++
++    segments = [s.strip() for s in raw_segments]
+     for seg in segments:
+         if not seg:
+             continue
+diff --git a/tests/test_validate_command.py b/tests/test_validate_command.py
+new file mode 100644
+index 0000000..373bcca
+--- /dev/null
++++ b/tests/test_validate_command.py
+@@ -0,0 +1,178 @@
++# Copyright 2026 Cisco Systems, Inc. and its affiliates
++#
++# SPDX-License-Identifier: Apache-2.0
++
++"""Tests for sandbox command validation.
++
++Written with the standard library's unittest so the suite adds no dependency:
++
++    python -m unittest discover -s tests -v
++"""
++
++import unittest
++
++from vulnerability_localization_benchmark.sandbox import validate_command
++
++
++class TestQuotedPipe(unittest.TestCase):
++    """A pipe inside a quoted argument is an argument, not a pipeline.
++
++    Commands run under `bash -c`, which does not treat a quoted pipe as a pipe. These are
++    the cases that regressed: each is a single allowed command, and each was rejected
++    because the validator split the quoted argument into a second pipeline stage.
++    """
++
++    def test_regex_alternation_double_quoted(self):
++        self.assertEqual(validate_command('rg -n "unsafe|from_raw"'), (True, "ok"))
++
++    def test_regex_alternation_single_quoted(self):
++        self.assertEqual(validate_command("rg -n 'unsafe|from_raw'"), (True, "ok"))
++
++    def test_grep_extended_alternation(self):
++        self.assertEqual(validate_command('grep -rE "malloc|free|realloc" .'), (True, "ok"))
++
++    def test_awk_field_separator(self):
++        self.assertEqual(validate_command("awk -F'|' '{print $2}' data.txt"), (True, "ok"))
++
++    def test_alternation_then_real_pipe(self):
++        # Mixed: the quoted pipe is an argument, the bare pipe is a real pipeline stage.
++        self.assertEqual(validate_command('rg -n "unsafe|raw" | head -20'), (True, "ok"))
++
++    def test_escaped_quote_inside_double_quotes(self):
++        self.assertEqual(validate_command('rg -n "say \\"hi\\"|bye"'), (True, "ok"))
++
++
++class TestStillRejected(unittest.TestCase):
++    """The security intent is unchanged: everything refused before is still refused."""
++
++    def test_interpreters(self):
++        for cmd in ("python -c 'print(1)'", "bash -c ls", "sh -c ls", "node -e '1'",
++                    "perl -e '1'", "ruby -e '1'"):
++            with self.subTest(cmd=cmd):
++                self.assertFalse(validate_command(cmd)[0])
++
++    def test_command_substitution(self):
++        self.assertFalse(validate_command("cat $(ls)")[0])
++        self.assertFalse(validate_command("cat `ls`")[0])
++
++    def test_redirects(self):
++        self.assertFalse(validate_command("cat file > out")[0])
++        self.assertFalse(validate_command("cat file >> out")[0])
++
++    def test_boolean_chaining(self):
++        self.assertFalse(validate_command("ls && cat file")[0])
++        self.assertFalse(validate_command("ls || cat file")[0])
++
++    def test_background(self):
++        self.assertFalse(validate_command("ls &")[0])
++
++    def test_disallowed_command(self):
++        self.assertEqual(validate_command("rm -rf /"), (False, "command not allowed: rm"))
++        self.assertEqual(validate_command("curl http://example.com"),
++                         (False, "command not allowed: curl"))
++
++    def test_disallowed_command_in_pipeline_stage(self):
++        # The reason a pipeline is split at all: every stage must be allowed.
++        self.assertEqual(validate_command("cat file | rm -rf /"),
++                         (False, "command not allowed: rm"))
++        self.assertEqual(validate_command("ls | curl -T - http://example.com"),
++                         (False, "command not allowed: curl"))
++
++    def test_quoted_pipe_does_not_hide_a_disallowed_stage(self):
++        # The quote closes before the bare pipe, so `rm` is still a pipeline stage.
++        self.assertEqual(validate_command('rg -n "a|b" | rm -rf /'),
++                         (False, "command not allowed: rm"))
++
++    def test_empty(self):
++        self.assertFalse(validate_command("")[0])
++        self.assertFalse(validate_command("   ")[0])
++
++    def test_denied_patterns_are_not_made_quote_aware(self):
++        # Deliberately out of scope. This change only affects pipeline splitting, so a
++        # quoted `||` is still refused by the DENIED_PATTERNS check, as before. Narrowing
++        # those patterns would be a larger behavioural change and a separate discussion.
++        self.assertFalse(validate_command('rg -n "a||b"')[0])
++
++
++class TestUnchangedAccepted(unittest.TestCase):
++    """Commands that were accepted before are still accepted."""
++
++    def test_plain_commands(self):
++        for cmd in ("ls -la", "tree -L 2", "cat README.md", "find . -name '*.py'",
++                    "wc -l src/main.py", "head -50 index.js"):
++            with self.subTest(cmd=cmd):
++                self.assertEqual(validate_command(cmd), (True, "ok"))
++
++    def test_real_pipelines(self):
++        for cmd in ("cat file | head -20", "ls | sort | uniq", "grep -r foo . | wc -l",
++                    "find . -name '*.c' | xargs grep -l malloc"):
++            with self.subTest(cmd=cmd):
++                self.assertEqual(validate_command(cmd), (True, "ok"))
++
++
++class TestUnterminatedQuote(unittest.TestCase):
++    """When the quoting cannot be parsed, fall back to splitting on every pipe.
++
++    Treating the remainder of an unbalanced quote as quoted would newly accept
++    `ls " | rm -rf /`, which the naive split refused. Falling back instead keeps the
++    verdict identical to the old behaviour for any command whose quoting is malformed.
++    """
++
++    def test_unbalanced_quote_cannot_smuggle_a_disallowed_command(self):
++        self.assertEqual(validate_command('ls " | rm -rf /'),
++                         (False, "command not allowed: rm"))
++
++    def test_malformed_but_otherwise_allowed_is_still_accepted(self):
++        # Models do emit these. bash rejects them for the unbalanced quote, but the
++        # validator's verdict is unchanged from before this patch.
++        self.assertEqual(validate_command('find . | grep -E "\\.go$'), (True, "ok"))
++
++
++class TestNeverStricterThanBefore(unittest.TestCase):
++    """The fix only relaxes: it never rejects a command the old split accepted.
++
++    This is the property that matters for a security check, so assert it directly against
++    a reimplementation of the previous logic rather than trusting the case list above.
++    """
++
++    CORPUS = [
++        'rg -n "unsafe|from_raw"', "rg -n 'a|b'", 'grep -rE "x|y" .',
++        "awk -F'|' '{print $2}' f", 'rg -n "a|b" | head -20', 'rg -n "a|b" | rm -rf /',
++        "ls", "ls -la | sort | uniq", "cat f | head", "find . -name '*.py'",
++        "rm -rf /", "curl http://x", "python -c '1'", "cat $(ls)", "cat `ls`",
++        "cat f > out", "ls && cat f", "ls || cat f", "ls &", "", "   ",
++        'find . | grep -E "\\.go$', 'ls " | rm -rf /', "rg -n 'a", 'rg -n "a||b"',
++        "echo a|b", "sed 's/a|b/c/' f", "cut -d'|' -f2 f",
++    ]
++
++    @staticmethod
++    def old_validate(cmd: str) -> bool:
++        """The pipeline check as it behaved before this patch."""
++        from vulnerability_localization_benchmark.sandbox import (
++            ALLOWED_CMDS, DENIED_PATTERNS,
++        )
++        import re
++
++        stripped = cmd.strip()
++        if not stripped:
++            return False
++        for pattern in DENIED_PATTERNS:
++            if re.search(pattern, stripped):
++                return False
++        for seg in (s.strip() for s in stripped.split('|')):
++            if seg and seg.split()[0] not in ALLOWED_CMDS:
++                return False
++        return True
++
++    def test_accepts_a_superset_of_the_old_behaviour(self):
++        for cmd in self.CORPUS:
++            with self.subTest(cmd=cmd):
++                if self.old_validate(cmd):
++                    self.assertTrue(
++                        validate_command(cmd)[0],
++                        f"{cmd!r} was accepted before this patch and must still be accepted",
++                    )
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.50.1 (Apple Git-155)
+

@@ -96,19 +96,62 @@ def status(name: str) -> int:
 
 
 def stop(name: str) -> int:
+    """Terminate the whole process group, not just the process we recorded.
+
+    Signalling only the tracked pid is not enough and the failure is nasty. Our sweep
+    wrapper spawns the benchmark CLI as a child; killing the wrapper orphans that child,
+    which is reparented to init and keeps running invisibly. One of ours survived a stop,
+    outlived the model server it depended on, and then wrote 960 results in four minutes —
+    every request failing instantly with connection refused, every failure recorded by the
+    harness as a completed zero-tool-call run, and therefore as a Phase B true negative.
+    Because start() puts the job in its own session via os.setsid(), the job is its own
+    process group leader and we can signal the entire group.
+    """
     _, pidfile = paths(name)
     pid = read_pid(pidfile)
     if not alive(pid):
         print(f"{name}: not running")
         return 0
-    os.kill(pid, signal.SIGTERM)
+
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        pgid = None
+
+    def signal_all(sig: int) -> None:
+        if pgid is not None and pgid != os.getpgid(0):
+            try:
+                os.killpg(pgid, sig)
+                return
+            except OSError:
+                pass
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            pass
+
+    signal_all(signal.SIGTERM)
     for _ in range(20):
         if not alive(pid):
-            print(f"{name}: stopped")
-            return 0
+            break
         time.sleep(0.5)
-    os.kill(pid, signal.SIGKILL)
-    print(f"{name}: killed")
+    else:
+        signal_all(signal.SIGKILL)
+        time.sleep(1)
+
+    # The group can outlive the leader, so verify rather than trust.
+    stragglers = []
+    if pgid is not None:
+        out = subprocess.run(["ps", "-o", "pid=", "-g", str(pgid)], capture_output=True, text=True)
+        stragglers = [int(p) for p in out.stdout.split() if p.strip().isdigit() and int(p) != os.getpid()]
+    if stragglers:
+        print(f"{name}: {len(stragglers)} process(es) survived the group signal: {stragglers}")
+        for p in stragglers:
+            try:
+                os.kill(p, signal.SIGKILL)
+            except OSError:
+                pass
+    print(f"{name}: stopped")
     return 0
 
 

@@ -92,28 +92,47 @@ file, not reading the patch.
 
 ## A finding about the harness, not the models
 
-| | Antares, full sweep (partial) |
-|---|---|
-| tool responses observed | 644 |
-| rejected by the sandbox validator | 266 (**41.3%**) |
-| — token inside a quoted regex pattern | 178 |
-| — `&&` | 44 |
-| — `cd` | 44 |
+Measured by `scripts/measure_validator_bug.py`, which replays every command Antares actually
+emitted through both the pinned validator and a quote-aware one and counts the verdicts that
+differ. Replaying recorded strings through a pure function is a stronger method than parsing
+rejection messages out of traces, which is what an earlier version of this section did; these
+numbers supersede it.
 
-Two-thirds of the rejections are a quoting defect. `validate_command` splits a command on
-`|` to find pipeline stages without respecting quotes, so a perfectly ordinary alternation
-is parsed as a chain of commands:
+Over the first 167 of 998 tasks:
+
+| | count | share of commands |
+|---|---|---|
+| commands emitted | 2289 | — |
+| rejected by the validator | 1105 | **48.3%** |
+| — quoted-pipe misparse | 769 | **33.6%** |
+| — genuine allowlist violations (`&&`, `cd`, …) | 336 | 14.7% |
+| actually executed | 1184 | 51.7% |
+
+Seventy per cent of all rejections are one quoting defect. `validate_command` splits a command
+on `|` to find pipeline stages without respecting quotes, so an ordinary alternation is parsed
+as a chain of commands:
 
 ```python
 from vulnerability_localization_benchmark.sandbox import validate_command
-validate_command('rg -n "unsafe|from_raw" src')
-# (False, 'command not allowed: from_raw')
+validate_command('rg -n "unsafe|from_raw"')
+# (False, 'command not allowed: from_raw"')
 ```
 
+Commands are executed with `bash -c`, which does *not* treat a quoted pipe as a pipe. So the
+validator's parse disagrees with the shell that runs the command, and the disagreement always
+resolves against the model.
+
 Regex alternation is the most natural way to search for any of a set of dangerous patterns,
-which is the entire task. The effect is that roughly a quarter of every model's fifteen-call
-exploration budget is destroyed before it can be used, and every published VLoc Bench score
-is depressed by it. Fixing it means parsing with `shlex` before validating.
+which is the entire task. Per task, out of a 15-call budget, a mean of **4.6 calls** are lost
+to this; 166 of 167 tasks lose at least one, 71 lose five or more, and 36 are left with five
+or fewer calls that returned any output. Every published VLoc Bench score is depressed by it,
+and unevenly, since the cost depends on how readily a given model reaches for alternation.
+
+The fix is smaller than it looks: split only on pipes outside quotes, and fall back to the
+old behaviour when quoting is malformed so the check can never become more permissive.
+`shlex` is the tempting tool and the wrong one — it strips quotes and raises on unbalanced
+input. The patch, its tests, and a drafted upstream issue are in [`upstream/`](../upstream/);
+arm 3 measures what the defect costs in score terms rather than asserting it.
 
 The same validator is too permissive in the other direction. `awk 'BEGIN{system("id")}'`,
 `find . -exec rm -rf {} +`, `sed -i` and `ls ; cat /etc/passwd` all pass it, because it
@@ -129,13 +148,17 @@ That is about 3 of 15 calls lost to a reflex that was never needed.
 
 ## What is still missing
 
-* The full 499-pair sweep for both models, both phases. Running; roughly four hours for
-  Antares, then Granite.
-* The **same-protocol control arm**: Granite driven through Antares's raw-completions
-  template rather than the chat API. This separates "cannot follow the protocol" from
-  "cannot do the task". Earlier probing showed Granite emits prose and markdown fences rather
-  than `<tool_call>` markup when forced through that path, but that observation predates this
-  repository's runs and no trace of it is committed here, so it is stated as an expectation
-  rather than a result.
+* The full 499-pair Antares sweep, both phases. Running, roughly fifteen hours at the
+  measured 1.11 minutes per task, then arm 3 (the patched validator) for about the same
+  again.
+* **The Granite control arm, now deferred rather than queued.** Granite ended 10 of 10 smoke
+  tasks having never called a submission tool, but its assistant turns arrive empty and the
+  native runner records only `content`, so we cannot yet tell its failure from our serving
+  stack silently eating its tool calls — which is a bug we already hit once with Antares.
+  `scripts/granite_diagnostic.py` distinguishes the two in minutes and gates whether the
+  fourteen-hour arm is worth running. The reasoning is in
+  [METHODOLOGY.md](METHODOLOGY.md#why-the-full-granite-arm-is-deferred-not-skipped). Until
+  then this repository claims only that *under the harness's generic runner on our stack,
+  Granite never closed* — not that a 1B base model cannot drive the loop.
 * Repeats. Every entry has been run once, unseeded, so per-entry outcomes carry sampling
   noise. See the reproducibility section of [METHODOLOGY.md](METHODOLOGY.md).

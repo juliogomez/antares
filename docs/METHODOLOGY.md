@@ -49,9 +49,77 @@ This asymmetry is deliberate and it favours the control. Granite ships a chat te
 native tool-calling support, so giving it the API it was built for is its best shot. Forcing
 it through Antares's hand-built format would produce a large gap that measured formatting
 compatibility rather than security ability. We would rather understate the difference than
-manufacture it. The same-protocol comparison is reported separately as a secondary result,
-where it answers a different and narrower question: how much of Antares's advantage is
-protocol adherence as opposed to judgement.
+manufacture it.
+
+One correction to that reasoning, since it changed our plan. We assumed the
+`vllm_antares` template was Antares-specific. It is not: `_build_prompt` emits
+`<|start_of_role|>…<|end_of_role|>`, which are **Granite's own special tokens**, inherited
+because Antares was post-trained from Granite 4.0. The only things Antares-specific about
+that path are the tool-instruction text and the `<think>\n` prefill. So a same-protocol
+Granite arm is much less unfair than we assumed — it is Granite's own tokenizer format with
+a different system prompt, not a foreign one.
+
+### Arms, and why they run in this order
+
+| Arm | Model | Harness | Purpose |
+|---|---|---|---|
+| 1 | Antares-1B | pinned `000c19c` | Headline, comparable to published numbers |
+| 3 | Antares-1B | `000c19c` + quote-aware validator | What the validator defect costs |
+| — | Granite-4.0-1B | pinned `000c19c`, native runner | Control. **Deferred**, see below |
+
+Arm 3 runs immediately after arm 1, against **the same live server process**. The only
+difference between the arms is a client-side `git checkout` of the harness: same weights,
+same config shim, same server, same sampling settings, same pairs in the same order. No
+restart, no reload, nothing that could drift. Arm 3's `provenance.json` records the patched
+commit, so the two runs are distinguishable after the fact.
+
+Arm 3 is not a deterministic replay. The harness default `temperature: 0.3` is used with no
+seed, so part of any per-task difference is sampling noise. That is why the comparison is
+paired over 499 pairs and why we will not read much into a small delta.
+
+### Why the full Granite arm is deferred, not skipped
+
+We had budgeted roughly fourteen hours for a 499-pair Granite sweep. We are not spending it
+yet, because the smoke set surfaced a confound that would make the result uninterpretable.
+
+What we can say from the smoke set is narrow but solid. Granite ended 10 of 10 tasks with
+`submitted_nothing=True`. In 9 of them `n_tool_calls == n_terminal_calls`, meaning it never
+called a submission tool at all — it was stopped by the loop's three-strikes rule after
+three turns that contained no tool call. Before going quiet it issued 3–8 **valid** terminal
+calls and received real output, and it never came close to the 15-call budget.
+
+So this is **not** a formatting failure in the obvious sense: something in that pipeline was
+emitting well-formed, correctly-named tool calls for several turns. What went wrong is
+closure — it stopped calling tools and never reached a submission.
+
+But "it stopped calling tools" has two explanations that produce identical scores, and we
+cannot yet separate them:
+
+1. Granite genuinely produced nothing useful once the task got harder, or
+2. `mlx_lm.server` recognised a tool call in Granite's output, failed to convert it into the
+   OpenAI `tool_calls` field, and returned an empty message — in which case the arm measures
+   our server rather than the model.
+
+Explanation 2 is live rather than paranoid: we already hit exactly this class of bug with
+Antares, where the server's inferred tool parser silently swallowed `<tool_call>` blocks
+until we set `tool_parser_type: null` (see `docs/TROUBLESHOOTING.md`). The traces cannot
+settle it either, because the native runner records only `content`, and `content` is empty
+in every assistant turn of every Granite trace we have.
+
+`scripts/granite_diagnostic.py` settles it cheaply, in minutes rather than hours: it asks
+the same server the same question through `chat/completions` with tools, through
+`chat/completions` without tools, and through raw `/v1/completions` with Granite's own chat
+template rendered locally so nothing server-side can intercept the output. If the raw path
+shows tool calls that the chat path dropped, the native-runner arm is measuring our stack
+and should not be run as-is; the same-protocol arm becomes the primary control instead. If
+the chat path does return tool calls, then Granite's collapse is its own and the full arm is
+worth its fourteen hours.
+
+Deciding first and running second costs us half an hour. Running first would have cost
+fourteen hours for a number we would then have had to caveat into uselessness. Until the
+diagnostic is read, the claim this repository makes about Granite is deliberately limited
+to: *under the harness's own generic runner on our serving stack, it never closed.* We do
+not yet claim that a 1B base model cannot drive this loop.
 
 ## Pre-registered metrics
 
@@ -84,9 +152,28 @@ definition. It has a consequence that matters enormously:
 > tool call are all credited identically to a considered decision to withhold.
 
 This is not hypothetical. In our smoke set, Granite scored a true-negative rate of **1.0** —
-and every single one of those true negatives was a run in which it never emitted a valid
-submission at all and was stopped by the loop's three-strikes rule. It did not abstain; it
-failed, and the metric applauded.
+and in 9 of those 10 runs it never called a submission tool at all (`n_tool_calls ==
+n_terminal_calls`), having been stopped by the loop's three-strikes rule. It did not abstain;
+it failed to close, and the metric applauded.
+
+Nor is the problem confined to weak models. The credit is awarded by
+`agent.py`, which sets `submitted_nothing = len(submitted_files) == 0` for **any** episode
+that ends without an explicit submission — exhausted turns, three consecutive turns with no
+tool call, or an API exception:
+
+```python
+    if not finished:
+        log.warning(f"[{container_name}] Agent exhausted {max_turns} turns without submitting")
+        submitted_nothing = len(submitted_files) == 0
+```
+
+An exception is caught with `break`, so a model server that is simply *down* produces a
+Phase B specificity of 1.0. We know because it happened to us twice, and the second time it
+wrote 960 fabricated results in four minutes (see `docs/TROUBLESHOOTING.md`). This is why
+`scripts/run_health.py` exists and why every arm is gated on it: it fingerprints the timing
+of zero-tool-call runs — milliseconds means a refused connection, exactly the timeout means
+a hung server, neither looks like generation — and refuses to score a run that contains
+them. Any Phase B number in this repository has passed that gate.
 
 So we report the harness number for comparability, and then decompose it:
 
