@@ -113,6 +113,7 @@ mode and its detection are in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 | [traces/](docs/traces/) | annotated real traces, success and failure |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | every wall we hit: TLS interception, Xet 403s, the three shim fixes, the silent timeout |
 | [INTEGRATION.md](docs/INTEGRATION.md) | using Antares as a Localizer role in a Foundry-style pipeline |
+| [upstream/](upstream/) | findings we intend to send back to the benchmark authors: two drafted issues, a private security report, and a patch with tests. **Nothing has been submitted** |
 
 ## Layout
 

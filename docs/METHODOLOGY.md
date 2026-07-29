@@ -214,6 +214,50 @@ model against them rather than against 1.0:
 | always submit something | > 0 | 0.0 | 0.0 |
 | never submit anything | 0.0 | **1.0** | 0.0 |
 
+## Results we threw away, and why
+
+Every number in this repository comes from a run that passed `scripts/run_health.py`. That
+gate exists because we twice produced large volumes of plausible, well-formed, entirely
+fabricated results, and we would rather publish the failures than the impression of a clean
+first attempt.
+
+**74 results, discarded.** Two `mlx_lm.server` instances on a 24 GB machine, each holding a
+2.4 GB prompt cache, plus Docker's VM, put the host into memory pressure. Every request blew
+through the runner's 180-second timeout, and the loop recorded each timeout as a completed
+zero-tool-call episode. Fixed by serving one model at a time with a capped cache.
+
+**960 results, discarded.** Worse, because it needed no memory pressure — only for us to stop
+a job. `scripts/daemon.py --stop` signalled the pid it had recorded, which is the
+`run_eval.py` wrapper, not the benchmark CLI that wrapper spawns. The CLI was orphaned to
+init, invisible to `--status`, and kept running for nearly five hours after we believed it
+stopped. It outlived the model server it depended on, so every request failed instantly with
+connection refused, and it wrote 960 result files in four minutes — every one of them scored
+as a Phase B true negative, because a dead server abstains perfectly. It also wrote 9 results
+into the replacement sweep's directory during the four seconds around relaunch, which is how
+an otherwise clean run ended up with 5 poisoned pairs.
+
+Fixes: `stop()` now signals the whole process group and verifies with `ps -g`;
+`scripts/run_health.py` classifies zero-tool-call results by timing, since a refused
+connection returns in milliseconds and a hung server returns at exactly the timeout, and
+neither is something token generation can do; and `scripts/arms.sh` gates every arm on it.
+The 5 poisoned pairs were re-run on the upstream validator as part of arm 1, so arm 1 is 499
+complete pairs with no gaps. Full postmortem in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md#stopping-a-sweep-leaves-an-orphan-that-fabricates-results).
+
+**35 truncated episodes, kept but excluded from behavioural rates.** A partial version of the
+same disease, and the one we did not anticipate. In the healthy arm 1 sweep the log contains
+33 `API error on turn N: Read timed out (read timeout=180)` entries: a single long generation
+exceeded the client's read timeout, `agent.py` caught the exception, broke out of the loop,
+and recorded `submitted_nothing=True` — a Phase B true negative — for an episode that was
+midway through exploring with budget unspent. `run_health.py` flags these as `truncated`
+rather than `ok`, and `analyze.py` excludes them from the denominator of any rate that claims
+to describe behaviour, while still reporting the harness's own figure.
+
+We deliberately do **not** re-run them. Re-rolling only the episodes that failed, and keeping
+whichever outcome came back, biases the result in a way that is hard to see and impossible to
+undo. Excluding them, by the same rule in every arm, is the honest treatment. It costs us 4.2%
+of entries and buys a number that means what it says.
+
 ## Reproducibility, and where it leaks
 
 * Every run directory contains `effective_config.yaml` and `provenance.json` recording the
