@@ -72,8 +72,17 @@ health_gate runs/antares-full
 
 # ---- arm 3: antares, patched validator --------------------------------------------
 # Client-side change only. The server keeps running, untouched, between the two arms.
-log "switching harness to ${PR_BRANCH} (editable install, so this is picked up in-place)"
-git -C "${BENCH}" checkout -q "${PR_BRANCH}" || { log "ABORT: checkout failed"; exit 1; }
+# Check out the resolved commit, detached, rather than the branch name. The branch is also
+# checked out in the vendor/vloc-bench-pr worktree where the patch was developed, and git
+# refuses to have one branch checked out in two worktrees. A detached checkout of the same
+# commit is identical code, and provenance.json records the sha either way.
+PR_SHA="$(git -C "${BENCH}" rev-parse "${PR_BRANCH}" 2>/dev/null)"
+if [[ -z "${PR_SHA}" ]]; then
+  log "ABORT: cannot resolve ${PR_BRANCH} in ${BENCH}"
+  exit 1
+fi
+log "switching harness to ${PR_BRANCH} (${PR_SHA:0:9}), detached (editable install picks it up in-place)"
+git -C "${BENCH}" checkout -q --detach "${PR_SHA}" || { log "ABORT: checkout failed"; exit 1; }
 git -C "${BENCH}" log --oneline -1
 
 if ! "${PY}" -c "
