@@ -48,7 +48,7 @@ Each assistant turn has two parts: a **reasoning block** (`<think>`) stating the
 
 **Reasoning:** “Start by identifying the project structure and key source files.”
 
-The model assumes a normal shell workflow (`cd … && ls`), but the harness rejects `&&`, then rejects bare `cd`. It does not repeat the same mistake—it **re-plans** and runs `find . -maxdepth 2`, which reveals `src/lib.rs`, `src/builder.rs`, `src/serde.rs`, and tests. Exploration budget: structure before vulnerability hunting.
+The model assumes a normal shell workflow (`cd … && ls`), but the harness rejects `&&`, then rejects bare `cd`. It does not repeat the same mistake—it **re-plans** and runs `find . -maxdepth 2`, which reveals `src/lib.rs`, `src/builder.rs`, `src/serde.rs`, and tests. It spends exploration budget learning the project structure before hunting for the vulnerability.
 
 #### 2. Translate CWE-119 into Rust-specific signals
 

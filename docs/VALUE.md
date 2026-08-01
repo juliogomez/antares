@@ -28,8 +28,8 @@ Antares does not take CVE/GHSA IDs or raw advisory prose as the harness prompt. 
 |---|---|
 | Repo + CWE description | Ranked file paths; reasoning in thinking blocks / traces |
 
-**Output the benchmark grades:** `submit_vulnerable_files` with ranked paths.  
-**Output Cisco’s demos sometimes highlight:** path + natural-language chain (flow, lines, fix hints). That richer shape is for human review; this repo surfaces it via traces and `--show-thinking`, not via F1.
+**What the benchmark grades:** `submit_vulnerable_files` with ranked paths.  
+**What Cisco’s demos also show:** path + natural-language chain (flow, lines, fix hints). That richer output is for human review; this repo surfaces it via traces and `--show-thinking`, not via F1.
 
 ## When it helps
 

@@ -10,7 +10,7 @@ On 499 benchmark repos, **Phase A**—each snapshot is **known to contain the bu
 
 **hit@any -> 33%** — Did Antares name at least one of the right files? On about **one repo in three**, its submitted list includes **at least one** file the benchmark marks as vulnerable. Extra wrong files in the list still count as a hit.
 
-**Mean file F1 -> 0.18** — How accurate is the whole list? Stays low because Antares often submits a list with additional non-vulnerable files on top of the vulnerable ones. A long list with one correct file scores well on hit@any but poorly here. Same thing happens if Antares misses vulnerable files and does not submit the complete list.
+**Mean file F1 -> ~0.18** — How accurate is the whole list? Stays low because Antares often submits a list with additional non-vulnerable files on top of the vulnerable ones. A long list with one correct file scores well on hit@any but poorly here. Same thing happens if Antares misses vulnerable files and does not submit the complete list.
 
 Interpretation and limits: [VALUE.md](docs/VALUE.md). Full tables, validator replay, and Cisco comparison: [RESULTS.md](docs/RESULTS.md).
 

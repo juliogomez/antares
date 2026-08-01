@@ -1,6 +1,6 @@
 # Official Cisco Antares CLI — exploration notes
 
-Scratch work for deciding whether to adopt the HF-packaged CLI alongside this repo’s `minimal_agent.py` / VLoc harness. **Not linked from main docs yet.**
+Scratch work for deciding whether to adopt the HF-packaged CLI alongside this repo’s `minimal_agent.py` / VLoc harness. Linked from [VALUE.md](../docs/VALUE.md#why-not-ciscos-official-cli-for-benchmarking).
 
 ## Source
 
