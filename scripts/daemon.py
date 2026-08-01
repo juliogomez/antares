@@ -101,7 +101,7 @@ def stop(name: str) -> int:
     Signalling only the tracked pid is not enough and the failure is nasty. Our sweep
     wrapper spawns the benchmark CLI as a child; killing the wrapper orphans that child,
     which is reparented to init and keeps running invisibly. One of ours survived a stop,
-    outlived the model server it depended on, and then wrote 960 results in four minutes —
+    outlived the model server it depended on, and then wrote 960 results in four minutes:
     every request failing instantly with connection refused, every failure recorded by the
     harness as a completed zero-tool-call run, and therefore as a Phase B true negative.
     Because start() puts the job in its own session via os.setsid(), the job is its own

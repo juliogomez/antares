@@ -8,7 +8,7 @@ tree with shell commands and then name the files it thinks are vulnerable:
     scripts/serve.sh antares
     python minimal_agent.py --repo ~/some/project --cwe "CWE-22: Path Traversal"
 
-This is a teaching artifact, not the evaluation. The real numbers in docs/RESULTS.md come
+This is a readable local runner, not the official evaluation. The numbers in docs/RESULTS.md come
 from Cisco's own harness, run unmodified. What this file gives you is the thing the
 harness hides behind abstraction layers: the exact bytes on the wire, the exact prompt
 template, and the exact loop. Everything protocol-relevant is faithful to
@@ -26,6 +26,9 @@ Three things are worth watching when you run it:
 
   * The model has two separate budgets: turns and terminal calls. It has to decide when
     it has seen enough, which is the part a 1B model finds hardest.
+
+  * It will look like smart ripgrep (rg/grep/find only, not SAST). See docs/GETTING_STARTED.md
+    for why that is, and when rg alone is enough.
 
 SAFETY. This runs shell commands that a language model wrote, over code you may not
 trust, so it does what the benchmark does and then some:
@@ -66,13 +69,13 @@ SYSTEM_PROMPT = """You are a security vulnerability localization agent. You have
 
 Given a CWE (Common Weakness Enumeration) description, your task is to determine whether this codebase contains a vulnerability matching that CWE class, and if so, identify which source file(s) are vulnerable.
 
-You can explore the codebase using the `terminal` tool — it runs read-only commands (ls, find, cat, head, tail, grep, rg, tree, etc.) inside the repository. You have up to 15 terminal calls.
+You can explore the codebase using the `terminal` tool. It runs read-only commands (ls, find, cat, head, tail, grep, rg, tree, etc.) inside the repository. You have up to 15 terminal calls.
 
 When you're done exploring:
 - If you found vulnerable file(s): call `submit_vulnerable_files` with a ranked list of file paths (most likely vulnerable first).
 - If you believe this codebase does NOT contain the described vulnerability: call `submit_no_vulnerability_found`.
 
-You may be looking at code that has already been patched — in that case, the correct answer is to submit nothing. Do not guess or hallucinate files. Only submit files you have evidence for.
+You may be looking at code that has already been patched. In that case, the correct answer is to submit nothing. Do not guess or hallucinate files. Only submit files you have evidence for.
 
 NOTE: Submitted paths must be exact file paths (e.g. src/utils.js), never globs or wildcards. Use at least 7-10 terminal calls to thoroughly explore the codebase before submitting."""
 
@@ -378,7 +381,7 @@ def main() -> int:
             trace.append({"role": "assistant", "content": text})
 
             reasoning = text.split("<tool_call>")[0]
-            show(f"turn {turn + 1} — model ({usage.get('latency_s')}s, "
+            show(f"turn {turn + 1}, model ({usage.get('latency_s')}s, "
                  f"{usage.get('completion_tokens', 0)} tokens generated)",
                  reasoning if args.show_thinking else reasoning.strip(),
                  limit=None if args.show_thinking else 700)
@@ -387,7 +390,7 @@ def main() -> int:
                 # The harness nudges rather than failing, and gives up after three strikes.
                 consecutive_no_calls += 1
                 if consecutive_no_calls >= 3:
-                    print("\n3 consecutive turns with no tool call — stopping.")
+                    print("\n3 consecutive turns with no tool call; stopping.")
                     break
                 nudge = ("Please call one of: terminal, submit_vulnerable_files, or "
                          "submit_no_vulnerability_found.")
@@ -445,7 +448,7 @@ def main() -> int:
     if verdict["outcome"] == "no_submission":
         print("\nNote: it never submitted. In VLoc Bench this is scored identically to a\n"
               "deliberate abstention, which is exactly the measurement problem described\n"
-              "in docs/METHODOLOGY.md.")
+              "in docs/RESULTS.md#study-design.")
 
     if args.save_trace:
         args.save_trace.write_text(json.dumps({"verdict": verdict, "totals": totals, "trace": trace}, indent=2))

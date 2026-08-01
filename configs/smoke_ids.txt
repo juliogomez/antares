@@ -3,7 +3,7 @@
 # Purpose is plumbing validation, not measurement. These IDs were chosen as the
 # smallest repository in each of five ecosystems so a full smoke pass finishes in
 # minutes. They are NOT a representative sample and no headline number should ever
-# be quoted from them — see docs/METHODOLOGY.md.
+# be quoted from them; see docs/RESULTS.md#study-design.
 #
 # alpha_id   ecosystem  repo                                    CWE(s)
 CfCCjjIt   # npm        DrPaulBrewer/cumulative-distribution-…  CWE-20, CWE-835

@@ -1,16 +1,9 @@
-# ibm-granite/granite-4.0-1b — the base instruct model Antares was trained from.
+# ibm-granite/granite-4.0-1b, historical only (not part of evaluation)
 #
-# This is the control arm. It answers "how much of Antares's score is the post-training
-# and how much was already in the base model?"
+# We ran one full sweep early in this POC; it scored 0% hit@any. Output: runs/granite-full.
+# Do not use for headline numbers. See README.md "Historical".
 #
-# Note the runner differs from Antares's on purpose. Granite ships a chat template with
-# native tool calling, so the fair comparison gives it the generic `vllm` runner and the
-# /v1/chat/completions path it was built for, rather than forcing it through Antares's
-# hand-built prompt format. Handicapping the control would make the headline number
-# meaningless. docs/METHODOLOGY.md records the same-protocol arm separately.
-#
-# Serve this checkpoint WITHOUT the shim: we want mlx-lm's tool parser active here, so
-# that Granite's tool calls arrive as structured OpenAI tool_calls.
+# If you must re-run: serve WITHOUT the Antares shim (native mlx-lm tool parser).
 
 model:
   api_base: "http://127.0.0.1:8081/v1"

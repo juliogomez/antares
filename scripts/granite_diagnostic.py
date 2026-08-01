@@ -9,16 +9,16 @@ An empty turn has two very different explanations, and the scores look identical
 
   A. the model genuinely produced nothing useful, or
   B. mlx_lm.server parsed a tool call out of the text, failed to convert it into the
-     OpenAI `tool_calls` field, and returned an empty message — in which case we are
+     OpenAI `tool_calls` field, and returned an empty message. In that case we are
      measuring our server, not Granite.
 
 The generic `vllm` runner uses /v1/chat/completions and depends entirely on the server for
 tool parsing, so it cannot tell A from B. This script asks the same model the same question
 three ways and prints what actually comes back:
 
-  1. chat/completions WITH tools     — exactly what the harness does
-  2. chat/completions WITHOUT tools  — is the model mute, or only mute when tools are passed?
-  3. completions (raw text)          — the unmediated output, with no server-side parsing
+  1. chat/completions WITH tools     (exactly what the harness does)
+  2. chat/completions WITHOUT tools  (is the model mute, or only mute when tools are passed?)
+  3. completions (raw text)          (the unmediated output, with no server-side parsing)
 
 If 3 contains a well-formed tool call that 1 dropped, the failure is ours and any Granite
 arm run through the chat API is measuring the wrong thing.
@@ -45,7 +45,7 @@ from vulnerability_localization_benchmark.model_runners.base import (  # noqa: E
 
 USER = (
     "Analyze this codebase for the following vulnerability class:\n\n"
-    "CWE-22: Path Traversal — The product uses external input to construct a pathname that "
+    "CWE-22: Path Traversal. The product uses external input to construct a pathname that "
     "should be within a restricted directory, but does not properly neutralize sequences "
     "such as '..' that can resolve to a location outside of that directory.\n\n"
     "The repository is at /workspace/repo/. Use the terminal tool to explore and determine "

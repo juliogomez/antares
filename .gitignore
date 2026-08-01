@@ -7,6 +7,10 @@ __pycache__/
 # Spike scratch from the de-risking phase; not part of the deliverable
 .spike/
 
+# Official CLI extracted from HF + scratch runs (see explore/NOTES.md)
+explore/antares-cli/
+explore/runs/
+
 # Model weights and the generated MLX shim. Rebuilt by scripts/build_mlx_shim.py
 # from the Hugging Face cache; never committed (multi-GB, and antares-1b is gated).
 models/

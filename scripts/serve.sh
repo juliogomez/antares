@@ -2,7 +2,7 @@
 # Serve a model locally with mlx_lm.server.
 #
 #   scripts/serve.sh antares    # shimmed Antares-1B on :8080  (raw /v1/completions)
-#   scripts/serve.sh granite    # stock Granite-4.0-1B on :8081 (/v1/chat/completions)
+#   scripts/serve.sh granite    # historical only; see configs/granite.yaml
 #
 # Both are served in bf16 with no quantization, so the weights are exactly what the
 # checkpoint publishes. Logs go to runs/logs/serve-<name>.log; the PID to runs/logs/.

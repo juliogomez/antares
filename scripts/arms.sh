@@ -4,19 +4,16 @@
 # This replaces the original overnight.sh queue. Two things changed after we looked at the
 # data:
 #
-#  1. The third Antares arm (patched validator) was promoted ahead of the full Granite
-#     sweep, because it answers a question we actually have — what the quote-splitting bug
-#     costs — whereas the Granite sweep has a confound we have not yet resolved.
-#
-#  2. Arm 3 deliberately runs against the *same live server process* as arm 1. The only
+#  1. The second Antares arm (patched validator) answers what the quote-splitting bug
+#     costs, the main open question besides headline Antares scores.
+#  2. Arm 2 deliberately runs against the *same live server process* as arm 1. The only
 #     difference between the two arms is a client-side git checkout of the harness, so no
 #     server restart, no reload, no requantisation, nothing that could drift.
 #
 # Order:
-#     arm 1  antares, upstream validator      (already running when this starts)
-#     mop-up antares, upstream validator      the 5 pairs lost to an orphaned process
-#     arm 3  antares, patched validator       same weights, same shim, same server
-#     diag   granite serving-stack diagnostic decides whether a Granite arm is meaningful
+#     arm 1  antares, upstream validator
+#     mop-up antares, upstream validator      (if configs/mopup_ids.txt exists)
+#     arm 2  antares, patched validator       same weights, same shim, same server
 #
 #   python scripts/daemon.py --name arms -- bash scripts/arms.sh
 set -uo pipefail
@@ -70,7 +67,7 @@ if [[ -s configs/mopup_ids.txt ]]; then
 fi
 health_gate runs/antares-full
 
-# ---- arm 3: antares, patched validator --------------------------------------------
+# ---- arm 2: antares, patched validator --------------------------------------------
 # Client-side change only. The server keeps running, untouched, between the two arms.
 # Check out the resolved commit, detached, rather than the branch name. The branch is also
 # checked out in the vendor/vloc-bench-pr worktree where the patch was developed, and git
@@ -97,7 +94,7 @@ fi
 log "patched validator confirmed active"
 
 "${PY}" scripts/run_eval.py --model antares --subset full --phases ab --out runs/antares-fixed
-log "arm 3 finished: $(count runs/antares-fixed) results"
+log "arm 2 finished: $(count runs/antares-fixed) results"
 health_gate runs/antares-fixed
 
 log "restoring the harness to the pinned upstream ref"
@@ -112,16 +109,7 @@ log "comparing the two Antares arms"
 "${PY}" scripts/analyze.py runs/antares-full runs/antares-fixed \
   --json-out runs/analysis-arms.json > runs/analysis-arms.txt 2>&1
 
-# ---- granite serving-stack diagnostic ---------------------------------------------
-log "stopping the antares server (never serve two models at once)"
+log "stopping the antares server"
 "${PY}" scripts/daemon.py --stop serve-antares
-sleep 10
-
-log "starting granite for the serving-stack diagnostic"
-./scripts/serve.sh granite || exit 1
-"${PY}" scripts/granite_diagnostic.py --out runs/granite-diagnostic.json \
-  > runs/granite-diagnostic.txt 2>&1
-log "granite diagnostic written; a full Granite arm is gated on reading it"
-"${PY}" scripts/daemon.py --stop serve-granite
 
 log "done."

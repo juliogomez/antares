@@ -18,12 +18,12 @@ Why this exists rather than just reading the harness's aggregate.json:
      failure, and we score the two phases *jointly* per repository, which is the only
      view in which "knows the difference between vulnerable and patched" is visible.
 
-Metrics are pre-registered in docs/METHODOLOGY.md and were fixed before the full sweep
+Metrics are pre-registered in docs/RESULTS.md#study-design and were fixed before the full sweep
 finished, so nothing here was chosen after seeing the results.
 
 Usage:
     python scripts/analyze.py runs/antares-full
-    python scripts/analyze.py runs/antares-full runs/granite-full --markdown
+    python scripts/analyze.py runs/antares-full runs/antares-fixed --markdown
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def classify_outcome(run_dir: Path, alpha_id: str, phase: str, result: dict) -> 
 
     `declared_none` means the model called submit_no_vulnerability_found. `truncated` means
     the episode was cut off mid-exploration, with budget still unspent, because the generate
-    call raised and the loop broke — a measurement failure, not a decision. `no_submission`
+    call raised and the loop broke (a measurement failure, not a decision). `no_submission`
     means it had its chances and never closed. The harness scores all three identically as
     an abstention, and in Phase B credits all three as a true negative; they are three
     different things.
@@ -295,14 +295,14 @@ def _bucket(n: int) -> str:
 
 
 def markdown(reports: list[dict]) -> str:
-    out = ["# Results", "", "## Phase A — localisation on the vulnerable tree", ""]
+    out = ["# Results", "", "## Phase A: localisation on the vulnerable tree", ""]
     rows = ["| run | n | mean file F1 | hit@any | exact set | abstain rate | mean terminal calls |",
             "|---|---|---|---|---|---|---|"]
     for r in reports:
         a = r["phase_a"]
         rows.append(f"| {r['run_dir']} | {a['n']} | {a.get('mean_file_f1')} | {a.get('hit_any_rate')} "
                     f"| {a.get('exact_set_rate')} | {a.get('abstain_rate')} | {a.get('mean_terminal_calls')} |")
-    out += rows + ["", "## Phase B — behaviour on the patched tree", ""]
+    out += rows + ["", "## Phase B: behaviour on the patched tree", ""]
     rows = ["| run | n | TNR (harness) | deliberate abstention | protocol failure | share of TN credit that was failure |",
             "|---|---|---|---|---|---|"]
     for r in reports:
@@ -310,7 +310,7 @@ def markdown(reports: list[dict]) -> str:
         rows.append(f"| {r['run_dir']} | {b['n']} | {b.get('true_negative_rate')} "
                     f"| {b.get('deliberate_abstention_rate')} | {b.get('protocol_failure_rate')} "
                     f"| {b.get('credited_tn_that_were_failures')} |")
-    out += rows + ["", "## Paired — did it tell the two trees apart?", ""]
+    out += rows + ["", "## Paired: did it tell the two trees apart?", ""]
     rows = ["| run | pairs | discrimination | discrimination & correct | conditional TNR given correct in A | identical repeat submissions |",
             "|---|---|---|---|---|---|"]
     for r in reports:

@@ -1,0 +1,5 @@
+# Three pairs for a short subset (~3–5 min Antares, phases A+B).
+# Smallest smoke repos across npm, pip, and rust. Not representative; see docs/GETTING_STARTED.md.
+CfCCjjIt
+JqAIZxnS
+Kv0mIk0C

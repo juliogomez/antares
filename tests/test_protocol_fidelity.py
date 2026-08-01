@@ -3,9 +3,8 @@
 
 minimal_agent.py exists to be read, so it copies the system prompt, the tool schema and the
 prompt template out of the benchmark rather than importing them. Copies rot. If upstream
-changes a single character of the system prompt, the teaching artifact silently starts
-describing a protocol that no longer exists, and anyone learning from it learns something
-false. This test compares the rendered bytes.
+changes a single character of the system prompt, minimal_agent.py silently starts
+describing a protocol that no longer exists. This test compares the rendered bytes.
 
 Run:  python tests/test_protocol_fidelity.py
 """

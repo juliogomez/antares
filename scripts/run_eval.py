@@ -12,8 +12,8 @@ This is a thin wrapper around the upstream CLI. It exists for three reasons:
   3. `--resume` is always on, so an overnight sweep that dies can be restarted.
 
 Usage:
-    python scripts/run_eval.py --model antares --subset smoke
-    python scripts/run_eval.py --model antares --subset full --phases ab
+    python scripts/run_eval.py --model antares --subset smoke          # Phase A (default)
+    python scripts/run_eval.py --model antares --subset full --phases ab  # full VLoc repro
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", choices=sorted(MODELS), required=True)
     ap.add_argument("--subset", default="smoke", help="'full' or the name of a configs/<name>_ids.txt list")
-    ap.add_argument("--phases", default="ab", choices=["a", "b", "ab"])
+    ap.add_argument("--phases", default="a", choices=["a", "b", "ab"])
     ap.add_argument("--out", default=None, help="run directory (default: runs/<model>-<subset>)")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--permissive", action="store_true", help="disable the sandbox command allowlist")

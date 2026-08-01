@@ -8,8 +8,8 @@ model actually emitted through both validators and counts the ones whose verdict
   new  the same validator with quote-aware pipeline splitting
 
 A command that the old validator rejects and the new one accepts is a budget item the model
-spent and got nothing back for. Commands rejected by both are the model's own fault — it
-asked for `cd`, or chained with `&&` — and are reported separately, because conflating the
+spent and got nothing back for. Commands rejected by both are the model's own fault: it
+asked for `cd`, or chained with `&&`. They are reported separately, because conflating the
 two would overstate the bug.
 
 Usage:
@@ -143,7 +143,7 @@ def main() -> int:
     probe = 'rg -n "unsafe|from_raw"'
     if validate_old(probe)[0] == validate_new(probe)[0]:
         raise SystemExit(
-            f"old and new validators agree on {probe!r} — check --old-src/--new-src, "
+            f"old and new validators agree on {probe!r}; check --old-src/--new-src, "
             "one of them is not the version you think it is"
         )
 

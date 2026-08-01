@@ -27,7 +27,7 @@ sandbox:
   command_timeout: 10
 
 eval:
-  phases: "ab"
+  phases: "a"       # default eval; stored full sweeps used "ab"
   # One worker. mlx_lm.server generates serially, so extra workers would queue on
   # the same GPU while thrashing its prompt cache, and would make per-turn latency
   # measurements meaningless.

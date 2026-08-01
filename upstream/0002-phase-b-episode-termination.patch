@@ -1,0 +1,242 @@
+From d262466ed941baa131df3946e263035d1ff7a729 Mon Sep 17 00:00:00 2001
+From: Julio Gomez <juliogomezsanchez@gmail.com>
+Date: Thu, 30 Jul 2026 13:57:56 +0200
+Subject: [PATCH] Record episode_termination and expose Phase B breakdown
+
+Phase B currently sets true_negative = submitted_nothing, so loop stops,
+API errors, and deliberate submit_no_vulnerability_found all score the
+same. That makes models that never submit look perfectly specific.
+
+Add episode_termination to each result:
+  submitted_files | declared_none | no_tool_calls | turns_exhausted | api_error
+
+Existing true_negative_rate is unchanged for leaderboard compatibility.
+Phase B aggregates now also report deliberate_true_negative_rate (only
+declared_none) and termination_counts. Per-entry Phase B JSON includes
+deliberate_true_negative.
+
+Tests: tests/test_episode_termination.py (unittest, no new deps).
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../agent.py                                  |   9 +-
+ .../cli.py                                    |   2 +
+ .../scoring.py                                |  12 ++-
+ tests/test_episode_termination.py             | 101 ++++++++++++++++++
+ 4 files changed, 120 insertions(+), 4 deletions(-)
+ create mode 100644 tests/test_episode_termination.py
+
+diff --git a/src/vulnerability_localization_benchmark/agent.py b/src/vulnerability_localization_benchmark/agent.py
+index 221f741..f4d553f 100644
+--- a/src/vulnerability_localization_benchmark/agent.py
++++ b/src/vulnerability_localization_benchmark/agent.py
+@@ -31,7 +31,8 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+         config: Agent config dict (max_turns, max_terminal_calls, etc.)
+ 
+     Returns:
+-        Dict with submitted_files, submitted_nothing, n_tool_calls, n_terminal_calls, trace
++        Dict with submitted_files, submitted_nothing, episode_termination, n_tool_calls,
++        n_terminal_calls, trace
+     """
+     from vulnerability_localization_benchmark.sandbox import exec_command, rebuild_container
+ 
+@@ -48,6 +49,7 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+     finished = False
+     container_alive = True
+     consecutive_no_calls = 0
++    episode_termination = "turns_exhausted"
+ 
+     for turn in range(max_turns):
+         if finished:
+@@ -57,6 +59,7 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+             assistant_msg, parsed_calls = runner.generate(conv)
+         except Exception as e:
+             log.error(f"API error on turn {turn}: {e}")
++            episode_termination = "api_error"
+             break
+ 
+         conv.append({"role": "assistant", "content": assistant_msg})
+@@ -66,6 +69,7 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+             consecutive_no_calls += 1
+             if consecutive_no_calls >= 3:
+                 log.warning(f"[{container_name}] 3 consecutive turns with no tool calls, forcing stop")
++                episode_termination = "no_tool_calls"
+                 break
+             nudge = runner.format_tool_response(
+                 "Please call one of: terminal, submit_vulnerable_files, or submit_no_vulnerability_found."
+@@ -129,6 +133,7 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+                     submitted_files = []
+                 submitted_nothing = False
+                 finished = True
++                episode_termination = "submitted_files"
+                 tool_results.append(f"Submitted {len(submitted_files)} file(s).")
+                 log.info(f"  [{container_name}] SUBMIT FILES: {submitted_files}")
+ 
+@@ -136,6 +141,7 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+                 submitted_files = []
+                 submitted_nothing = True
+                 finished = True
++                episode_termination = "declared_none"
+                 tool_results.append("Recorded: no vulnerability found.")
+                 log.info(f"  [{container_name}] SUBMIT: no vulnerability found")
+ 
+@@ -155,6 +161,7 @@ def run_agent(runner, container_name: str, user_prompt: str, config: dict) -> di
+     return {
+         "submitted_files": submitted_files,
+         "submitted_nothing": submitted_nothing,
++        "episode_termination": episode_termination,
+         "n_tool_calls": n_tool_calls,
+         "n_terminal_calls": n_terminal_calls,
+         "conversation_turns": len(trace),
+diff --git a/src/vulnerability_localization_benchmark/cli.py b/src/vulnerability_localization_benchmark/cli.py
+index eb010ab..58290c8 100644
+--- a/src/vulnerability_localization_benchmark/cli.py
++++ b/src/vulnerability_localization_benchmark/cli.py
+@@ -81,6 +81,7 @@ def run_entry(runner, row: dict, phase: str, zips_dir: str,
+         scores = score_phase_a(agent_result["submitted_files"], ground_truth, agent_result["submitted_nothing"])
+     else:
+         scores = score_phase_b(agent_result["submitted_files"], agent_result["submitted_nothing"])
++        scores["deliberate_true_negative"] = agent_result["episode_termination"] == "declared_none"
+ 
+     destroy_container(container_name)
+ 
+@@ -93,6 +94,7 @@ def run_entry(runner, row: dict, phase: str, zips_dir: str,
+         "ground_truth_files": ground_truth,
+         "submitted_files": agent_result["submitted_files"],
+         "submitted_nothing": agent_result["submitted_nothing"],
++        "episode_termination": agent_result["episode_termination"],
+         "n_tool_calls": agent_result["n_tool_calls"],
+         "n_terminal_calls": agent_result["n_terminal_calls"],
+         **scores,
+diff --git a/src/vulnerability_localization_benchmark/scoring.py b/src/vulnerability_localization_benchmark/scoring.py
+index 114cd33..0fb5857 100644
+--- a/src/vulnerability_localization_benchmark/scoring.py
++++ b/src/vulnerability_localization_benchmark/scoring.py
+@@ -67,9 +67,15 @@ def aggregate_scores(results: list[dict], phase: str) -> dict:
+         }
+     elif phase == "b":
+         tns = [r["true_negative"] for r in results]
++        terminations = [r.get("episode_termination", "unknown") for r in results]
++        termination_counts = {k: terminations.count(k) for k in sorted(set(terminations))}
++        deliberate = sum(1 for t in terminations if t == "declared_none")
++        n = len(results)
+         return {
+-            "true_negative_rate": round(sum(tns) / len(tns), 4),
+-            "false_positive_rate": round(1 - sum(tns) / len(tns), 4),
+-            "n_entries": len(results),
++            "true_negative_rate": round(sum(tns) / n, 4),
++            "false_positive_rate": round(1 - sum(tns) / n, 4),
++            "deliberate_true_negative_rate": round(deliberate / n, 4),
++            "termination_counts": termination_counts,
++            "n_entries": n,
+         }
+     return {}
+diff --git a/tests/test_episode_termination.py b/tests/test_episode_termination.py
+new file mode 100644
+index 0000000..4bbf940
+--- /dev/null
++++ b/tests/test_episode_termination.py
+@@ -0,0 +1,101 @@
++# Copyright 2026 Cisco Systems, Inc. and its affiliates
++#
++# SPDX-License-Identifier: Apache-2.0
++
++"""Tests for episode_termination labelling and Phase B aggregate breakdown."""
++
++import unittest
++from unittest.mock import patch
++
++from vulnerability_localization_benchmark.agent import run_agent
++from vulnerability_localization_benchmark.scoring import aggregate_scores, score_phase_b
++
++
++class FakeRunner:
++    """Minimal runner stub for agent-loop tests."""
++
++    def __init__(self, steps):
++        self.steps = list(steps)
++
++    def init_conversation(self, user_prompt):
++        return [{"role": "user", "content": user_prompt}]
++
++    def generate(self, conv):
++        if not self.steps:
++            return "", []
++        return self.steps.pop(0)
++
++    def format_tool_response(self, content, **kwargs):
++        return {"role": "tool", "content": content}
++
++
++class TestEpisodeTermination(unittest.TestCase):
++    def test_declared_none(self):
++        runner = FakeRunner([
++            ("", [{"name": "submit_no_vulnerability_found", "arguments": {}}]),
++        ])
++        result = run_agent(runner, "c_test", "prompt", {"max_turns": 5, "max_terminal_calls": 15})
++        self.assertEqual(result["episode_termination"], "declared_none")
++        self.assertTrue(result["submitted_nothing"])
++
++    def test_submitted_files(self):
++        runner = FakeRunner([
++            ("", [{"name": "submit_vulnerable_files", "arguments": {"ranked_files": ["a.py"]}}]),
++        ])
++        result = run_agent(runner, "c_test", "prompt", {"max_turns": 5, "max_terminal_calls": 15})
++        self.assertEqual(result["episode_termination"], "submitted_files")
++        self.assertFalse(result["submitted_nothing"])
++        self.assertEqual(result["submitted_files"], ["a.py"])
++
++    def test_no_tool_calls(self):
++        runner = FakeRunner([
++            ("thinking", []),
++            ("still nothing", []),
++            ("again", []),
++        ])
++        result = run_agent(runner, "c_test", "prompt", {"max_turns": 20, "max_terminal_calls": 15})
++        self.assertEqual(result["episode_termination"], "no_tool_calls")
++        self.assertTrue(result["submitted_nothing"])
++
++    def test_api_error(self):
++        class ErrorRunner(FakeRunner):
++            def generate(self, conv):
++                raise RuntimeError("timeout")
++
++        result = run_agent(ErrorRunner([]), "c_test", "prompt", {"max_turns": 5, "max_terminal_calls": 15})
++        self.assertEqual(result["episode_termination"], "api_error")
++        self.assertTrue(result["submitted_nothing"])
++
++    def test_turns_exhausted(self):
++        runner = FakeRunner([
++            ("", [{"name": "terminal", "arguments": {"command": "ls"}}]),
++        ] * 25)
++        with patch("vulnerability_localization_benchmark.sandbox.exec_command", return_value="ok"):
++            result = run_agent(runner, "c_test", "prompt", {"max_turns": 3, "max_terminal_calls": 15})
++        self.assertEqual(result["episode_termination"], "turns_exhausted")
++        self.assertTrue(result["submitted_nothing"])
++
++
++class TestPhaseBAggregate(unittest.TestCase):
++    def test_termination_breakdown(self):
++        results = [
++            {"true_negative": True, "episode_termination": "declared_none"},
++            {"true_negative": True, "episode_termination": "no_tool_calls"},
++            {"true_negative": False, "episode_termination": "submitted_files"},
++            {"true_negative": True, "episode_termination": "api_error"},
++        ]
++        agg = aggregate_scores(results, "b")
++        self.assertEqual(agg["true_negative_rate"], 0.75)
++        self.assertEqual(agg["deliberate_true_negative_rate"], 0.25)
++        self.assertEqual(agg["termination_counts"]["api_error"], 1)
++        self.assertEqual(agg["termination_counts"]["declared_none"], 1)
++        self.assertEqual(agg["termination_counts"]["no_tool_calls"], 1)
++        self.assertEqual(agg["termination_counts"]["submitted_files"], 1)
++
++    def test_score_phase_b_unchanged(self):
++        scores = score_phase_b([], submitted_nothing=True)
++        self.assertTrue(scores["true_negative"])
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.50.1 (Apple Git-155)
+

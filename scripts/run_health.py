@@ -50,8 +50,8 @@ def classify_health(
     calling any submit tool, while it still had budget left, did not decide anything: the
     generate call raised and the loop broke. The harness then records submitted_nothing,
     which Phase B scores as a true negative. Unlike the wholesale failures this is not
-    grounds for throwing the run away — the usual cause here is one long generation
-    exceeding the client's read timeout, not a dead server — but it must not be counted as
+    grounds for throwing the run away (the usual cause here is one long generation
+    exceeding the client's read timeout, not a dead server), but it must not be counted as
     an abstention either, so it gets its own bucket rather than "ok".
     """
     calls = result.get("n_tool_calls", 0)
@@ -65,7 +65,7 @@ def classify_health(
             return (
                 "truncated",
                 f"ended after {terminal}/{max_terminal_calls} terminal calls without "
-                "calling any submit tool, with budget remaining — the episode was cut "
+                "calling any submit tool, with budget remaining; the episode was cut "
                 "short (usually a read timeout), so its submitted_nothing is not a decision",
             )
         return "ok", "made at least one tool call"
@@ -74,18 +74,18 @@ def classify_health(
     if elapsed < INSTANT_FAILURE_S:
         return (
             "infrastructure_failure",
-            f"zero tool calls in {elapsed:.3f}s — too fast to be generation; "
+            f"zero tool calls in {elapsed:.3f}s, too fast to be generation; "
             "the model server almost certainly refused the connection",
         )
     if elapsed >= TIMEOUT_FRACTION * timeout_s:
         return (
             "infrastructure_failure",
             f"zero tool calls and agent_time_s {elapsed:.1f}s pinned at the {timeout_s:.0f}s "
-            "timeout — the model server hung rather than answered",
+            "timeout; the model server hung rather than answered",
         )
     return (
         "suspect",
-        f"zero tool calls in {elapsed:.1f}s — possible but unusual; "
+        f"zero tool calls in {elapsed:.1f}s, possible but unusual; "
         "the model submitted without looking at anything",
     )
 

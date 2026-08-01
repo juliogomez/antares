@@ -42,6 +42,23 @@ if [[ "${ACTUAL}" != "${PINNED_REF}" ]]; then
 fi
 
 echo "==> vloc-bench pinned at ${ACTUAL}"
-echo "==> installing into the project venv (editable, so upstream code stays readable)"
-"${ROOT}/.venv/bin/pip" install --quiet -e "${DEST}"
+
+VENV_PIP="${ROOT}/.venv/bin/pip"
+if [[ ! -x "${VENV_PIP}" ]]; then
+  echo "ERROR: project venv missing; run: python3 -m venv .venv" >&2
+  exit 1
+fi
+
+# Upstream pyproject lists vllm/torch/transformers for Cisco's CUDA stack. This POC
+# serves models via mlx-lm and the harness runners only use HTTP (requests). Skip GPU
+# deps so pip install works on Apple Silicon Macs.
+echo "==> installing harness into .venv (editable, --no-deps; Mac/laptop path)"
+"${VENV_PIP}" install --quiet -e "${DEST}" --no-deps
+echo "==> installing harness runtime deps (requests, pyyaml, tqdm)"
+"${VENV_PIP}" install --quiet "requests>=2.31" "pyyaml>=6.0" "tqdm>=4.66"
+
+echo "==> verifying import"
+"${ROOT}/.venv/bin/python" -c \
+  "from vulnerability_localization_benchmark.model_runners import get_runner; get_runner('vllm_antares')"
+
 echo "==> done. Harness lives at ${DEST} (gitignored)."
