@@ -36,7 +36,7 @@ Antares does not take CVE/GHSA IDs or raw advisory prose as the harness prompt. 
 - **Advisory-driven triage:** “GHSA mentions CWE-79 in this service—which files first?” (after you map to CWE text)
 - **Shift-left / CI smoke:** small `--subset` harness runs as a pipeline check ([GETTING_STARTED.md](GETTING_STARTED.md))
 - **Air-gapped or laptop review:** weights and repo stay on your machine ([INTERNALS.md](INTERNALS.md))
-- **Scope reduction:** shortlist before a heavier indexer, detector, or larger model ([Foundry localizer](#planned-foundry-localizer) below)
+- **Scope reduction:** shortlist before a heavier indexer, detector, or larger model ([Foundry localizer](#foundry-localizer) below)
 
 Cisco positions the **Antares family** (350M, 1B, 3B) for different hardware tiers. **This repo runs Antares-1B only** on Apple Silicon via mlx-lm.
 
@@ -93,8 +93,17 @@ Links: [model card](https://huggingface.co/fdtn-ai/antares-1b), [technical repor
 - Proof that listed files are vulnerable
 - A guarantee of privacy beyond your own deployment (you control where weights and code run)
 
-## Planned: Foundry Localizer
+## Foundry Localizer
 
-**Not implemented.** In [foundry-poc-demo](https://github.com/juliogomez/foundry-poc-demo), scan scope is hand-written (`include_globs`). A **Localizer** would run first:
+**Implemented** in [foundry-poc-demo](https://github.com/juliogomez/foundry-poc-demo) — see [`docs/LOCALIZER.md`](https://github.com/juliogomez/foundry-poc-demo/blob/main/docs/LOCALIZER.md).
 
-    CWE + repo → Antares file shortlist → Indexer / Detector / Triager on that smaller scope.
+The `localize` command uses the official Antares CLI as a scope-reduction step before Foundry's governed analysis:
+
+    CWE + repo → Antares file shortlist → neighborhood expansion → Foundry pipeline on narrowed scope
+
+On Langflow (289 units full scope), CWE-22 localization reduces to ~31 units — a **~90% reduction** in scope and token cost while focusing analysis on the advisory-relevant code.
+
+```bash
+# In the foundry-poc-demo repo:
+python -m foundry_poc.cli localize --cwe CWE-22
+```

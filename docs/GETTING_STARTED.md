@@ -29,7 +29,7 @@ Each assistant message in the trace is **two layers**: fixed runner plumbing, th
 | Layer | Who provides it | What it is |
 |---|---|---|
 | **Task framing** | Runner (static) | System prompt: “localize this CWE,” tool names, sandbox rules. User message: your CWE description. Same template every run ([`minimal_agent.py`](../minimal_agent.py), official harness). |
-| **Thinking opener** | Runner (static) | Before each completion, the runner prompt ends with the `<think>\n` opener, so the model continues it in “reason first, then act” format. |
+| **Thinking opener** | Runner (static) | Before each completion, the runner prompt ends with the `<think>` opener, so the model continues it in “reason first, then act” format. |
 | **Reasoning text** | **Antares (dynamic)** | Everything until the closing `</think>` (e.g. “Locate memory-unsafe code or buffer operations.”) is **new text every turn**, from the weights, based on CWE + conversation so far. Not scripted by the loop. |
 | **Tool call** | **Antares (dynamic)** | The `<tool_call>{"name": …, "arguments": …}</tool_call>` block: which tool (`terminal`, `submit_vulnerable_files`, …) and the exact command or file list. Also **generated each turn**—not picked from a menu by the runner. |
 | **Execution** | Runner (static) | Regex-parse the first tool call, validate command, run in Docker, append `<tool_response>` to the conversation. Feed the updated transcript back to the model for the next turn. |
