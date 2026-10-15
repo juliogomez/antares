@@ -48,3 +48,6 @@ secrets/
 .DS_Store
 .idea/
 .vscode/
+
+# Blog drafts and images (published elsewhere)
+blog/
